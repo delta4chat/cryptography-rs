@@ -19,7 +19,7 @@ use {
     std::io::Write,
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash)]
 pub enum Version {
     V1 = 0,
 }

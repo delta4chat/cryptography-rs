@@ -24,7 +24,7 @@ use {
 /// X.690 allows [GeneralizedTime] to have multiple timezone formats. However,
 /// various RFCs restrict which formats are allowed. This enumeration exists to
 /// express which formats should be allowed by a parser.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum GeneralizedTimeAllowedTimezone {
     /// Allow either `Z` or timezone offset formats.
     Any,
@@ -33,7 +33,7 @@ pub enum GeneralizedTimeAllowedTimezone {
     Z,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Time {
     UtcTime(UtcTime),
     GeneralTime(GeneralizedTime),
@@ -85,7 +85,7 @@ impl From<Time> for chrono::DateTime<chrono::Utc> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 enum Zone {
     Utc,
     Offset(chrono::FixedOffset),
@@ -100,7 +100,7 @@ impl Display for Zone {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GeneralizedTime {
     time: chrono::NaiveDateTime,
     fractional_seconds: bool,
@@ -358,7 +358,7 @@ impl PrimitiveContent for GeneralizedTime {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UtcTime(chrono::DateTime<chrono::Utc>);
 
 impl From<chrono::DateTime<chrono::Utc>> for UtcTime {

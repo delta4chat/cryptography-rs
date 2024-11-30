@@ -87,7 +87,7 @@ impl OneAsymmetricKey {
 /// ```ASN.1
 /// Version ::= INTEGER { v1(0), v2(1) } (v1, ..., v2)
 /// ```
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum Version {
     V1 = 0,
     V2 = 1,

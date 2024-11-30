@@ -18,7 +18,7 @@ use bcder::{
 ///   publicExponent    INTEGER   -- e
 /// }
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RsaPublicKey {
     pub modulus: Unsigned,
     pub public_exponent: Unsigned,

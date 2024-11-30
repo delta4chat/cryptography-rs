@@ -298,7 +298,7 @@ impl DigestAlgorithm {
 /// It is also possible to obtain a [signature::VerificationAlgorithm] from
 /// an instance. This type can perform actual cryptographic verification
 /// that was signed with this algorithm.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum SignatureAlgorithm {
     /// SHA-1 with RSA encryption.
     ///
@@ -521,7 +521,7 @@ impl From<SignatureAlgorithm> for AlgorithmIdentifier {
 }
 
 /// Represents a known curve used with ECDSA.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum EcdsaCurve {
     Secp256r1,
     Secp384r1,
@@ -569,7 +569,7 @@ impl From<EcdsaCurve> for &'static signature::EcdsaSigningAlgorithm {
 ///
 /// Instances can be converted to/from the underlying ASN.1 type and
 /// OIDs.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum KeyAlgorithm {
     /// RSA
     ///
