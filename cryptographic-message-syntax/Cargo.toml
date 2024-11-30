@@ -22,8 +22,9 @@ ring = "0.17.8"
 signature = { version = "2.2.0", features = ["std"] }
 
 [dependencies.x509-certificate]
+package = "x509cert"
 path = "../x509-certificate"
-version = "0.24.0"
+version = "0.25.0"
 features = ["test"]
 
 [features]

@@ -376,7 +376,7 @@ dependencies = [
  "reqwest",
  "ring",
  "signature",
- "x509-certificate",
+ "x509cert",
 ]
 
 [[package]]
@@ -2380,8 +2380,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "x509-certificate"
-version = "0.24.0"
+name = "x509cert"
+version = "0.25.0"
 dependencies = [
  "bcder",
  "bytes",
