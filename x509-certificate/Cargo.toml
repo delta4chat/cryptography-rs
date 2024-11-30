@@ -1,14 +1,13 @@
 [package]
-name = "x509-certificate"
-version = "0.24.0"
-authors = ["Gregory Szorc <gregory.szorc@gmail.com>"]
+name = "x509cert"
+version = "0.25.0"
+authors = ["Gregory Szorc <gregory.szorc@gmail.com>", "Delta4 <156182500+delta4chat@users.noreply.github.com>"]
 edition = "2021"
 rust-version = "1.75"
 license = "MPL-2.0"
-description = "X.509 certificate parser and utility functionality"
+description = "anypki fork of X.509 certificate parser and utility functionality"
 keywords = ["x509", "cryptography", "pki"]
-homepage = "https://github.com/indygreg/cryptography-rs"
-repository = "https://github.com/indygreg/cryptography-rs.git"
+repository = "https://github.com/delta4chat/cryptography-rs"
 readme = "README.md"
 
 [features]
@@ -26,3 +25,4 @@ signature = { version = "2.2.0", features = ["std"] }
 spki = { version = "0.7.3", features = ["alloc"] }
 thiserror = "1.0.66"
 zeroize = { version = "1.8.1", features = ["derive"] }
+

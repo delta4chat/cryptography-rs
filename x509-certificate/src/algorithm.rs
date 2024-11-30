@@ -97,7 +97,7 @@ pub(crate) const OID_EC_SECP256R1: ConstOid = Oid(&[42, 134, 72, 206, 61, 3, 1, 
 pub(crate) const OID_EC_SECP384R1: ConstOid = Oid(&[43, 129, 4, 0, 34]);
 
 /// No signature identifier
-/// 
+///
 /// 1.3.6.1.5.5.7.6.2
 pub(crate) const OID_NO_SIGNATURE_ALGORITHM: ConstOid = Oid(&[43, 6, 1, 5, 5, 7, 6, 2]);
 
@@ -336,9 +336,9 @@ pub enum SignatureAlgorithm {
     Ed25519,
 
     /// No signature with digest algorithm
-    /// 
+    ///
     /// Corresponds to OID 1.3.6.1.5.5.7.6.2
-    NoSignature(DigestAlgorithm)
+    NoSignature(DigestAlgorithm),
 }
 
 impl SignatureAlgorithm {
@@ -391,9 +391,7 @@ impl SignatureAlgorithm {
     }
 
     /// Creates an instance with the noSignature mechanism and [DigestAlgorithm]
-    pub fn from_digest_algorithm(
-        digest_algorithm: DigestAlgorithm,
-    ) -> Self {
+    pub fn from_digest_algorithm(digest_algorithm: DigestAlgorithm) -> Self {
         Self::NoSignature(digest_algorithm)
     }
 
@@ -458,7 +456,9 @@ impl Display for SignatureAlgorithm {
             SignatureAlgorithm::EcdsaSha256 => f.write_str("ECDSA with SHA-256"),
             SignatureAlgorithm::EcdsaSha384 => f.write_str("ECDSA with SHA-384"),
             SignatureAlgorithm::Ed25519 => f.write_str("ED25519"),
-            SignatureAlgorithm::NoSignature(digest_algorithm) => f.write_fmt(format_args!("No signature with {}", digest_algorithm)),
+            SignatureAlgorithm::NoSignature(digest_algorithm) => {
+                f.write_fmt(format_args!("No signature with {}", digest_algorithm))
+            }
         }
     }
 }

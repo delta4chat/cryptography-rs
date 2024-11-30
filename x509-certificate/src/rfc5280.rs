@@ -305,8 +305,7 @@ impl TbsCertificate {
                 let subject_unique_id = cons.take_opt_constructed_if(Tag::CTX_2, |cons| {
                     UniqueIdentifier::take_from(cons)
                 })?;
-                let extensions =
-                    cons.take_opt_constructed_if(Tag::CTX_3, Extensions::take_from)?;
+                let extensions = cons.take_opt_constructed_if(Tag::CTX_3, Extensions::take_from)?;
 
                 res = Some(Self {
                     version,
