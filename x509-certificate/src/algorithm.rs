@@ -11,7 +11,7 @@ use {
         X509CertificateError as Error,
     },
     bcder::{encode::Values, ConstOid, OctetString, Oid},
-    ring::{digest, signature},
+    //ring::{digest, signature},
     spki::ObjectIdentifier,
     std::fmt::{Display, Formatter},
 };
@@ -136,24 +136,23 @@ pub enum DigestAlgorithm {
 
 impl Display for DigestAlgorithm {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DigestAlgorithm::Sha1 => f.write_str("SHA-1"),
-            DigestAlgorithm::Sha256 => f.write_str("SHA-256"),
-            DigestAlgorithm::Sha384 => f.write_str("SHA-384"),
-            DigestAlgorithm::Sha512 => f.write_str("SHA-512"),
-        }
+        f.write_str(match self {
+            DigestAlgorithm::Sha1 => "SHA-1",
+            DigestAlgorithm::Sha256 => "SHA-256",
+            DigestAlgorithm::Sha384 => "SHA-384",
+            DigestAlgorithm::Sha512 => "SHA-512",
+        })
     }
 }
 
 impl From<DigestAlgorithm> for Oid {
     fn from(alg: DigestAlgorithm) -> Self {
         Oid(match alg {
-            DigestAlgorithm::Sha1 => OID_SHA1.as_ref(),
-            DigestAlgorithm::Sha256 => OID_SHA256.as_ref(),
-            DigestAlgorithm::Sha384 => OID_SHA384.as_ref(),
-            DigestAlgorithm::Sha512 => OID_SHA512.as_ref(),
-        }
-        .into())
+            DigestAlgorithm::Sha1 => OID_SHA1,
+            DigestAlgorithm::Sha256 => OID_SHA256,
+            DigestAlgorithm::Sha384 => OID_SHA384,
+            DigestAlgorithm::Sha512 => OID_SHA512,
+        }.as_ref().into())
     }
 }
 
@@ -192,9 +191,10 @@ impl From<DigestAlgorithm> for AlgorithmIdentifier {
     }
 }
 
-impl From<DigestAlgorithm> for digest::Context {
+#[cfg(feature="ring")]
+impl From<DigestAlgorithm> for ring::digest::Context {
     fn from(alg: DigestAlgorithm) -> Self {
-        digest::Context::new(match alg {
+        ring::digest::Context::new(match alg {
             DigestAlgorithm::Sha1 => &digest::SHA1_FOR_LEGACY_USE_ONLY,
             DigestAlgorithm::Sha256 => &digest::SHA256,
             DigestAlgorithm::Sha384 => &digest::SHA384,
@@ -204,39 +204,73 @@ impl From<DigestAlgorithm> for digest::Context {
 }
 
 impl DigestAlgorithm {
+    #[cfg(feature="rustcrypto")]
+    pub fn get_digest(&self) -> impl digest::Digest {
+        match self {
+            Self::Sha1 => sha1::Sha1::new(),
+            Self::Sha256 => sha2::Sha256::new(),
+            Self::Sha384 => sha2::Sha384::new(),
+            Self::Sha512 => sha2::Sha512::new(),
+        }
+    }
+
     /// Obtain an object that can be used to digest content using this algorithm.
-    pub fn digester(&self) -> digest::Context {
-        digest::Context::from(*self)
+    #[cfg(feature="ring")]
+    pub fn get_ring_context(&self) -> ring::digest::Context {
+        ring::digest::Context::from(*self)
+    }
+
+    /// [Deprecated] Obtain an object that can be used to digest content using this algorithm.
+    #[cfg(feature="ring")]
+    #[deprecated]
+    pub fn digester(&self) -> ring::digest::Context {
+        self.get_ring_context()
     }
 
     /// Digest a slice of data.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn digest_data(&self, data: &[u8]) -> Vec<u8> {
-        let mut h = self.digester();
-        h.update(data);
-        h.finish().as_ref().to_vec()
+        #[cfg(feature="rustcrypto")]
+        {
+            self.get_digest().digest().as_ref().to_vec()
+        }
+
+        #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
+        {
+            self.get_ring_context().update(data).finish().as_ref().to_vec()
+        }
     }
 
     /// Digest content from a reader.
-    pub fn digest_reader<R: std::io::Read>(&self, fh: &mut R) -> Result<Vec<u8>, std::io::Error> {
-        let mut h = self.digester();
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
+    pub fn digest_reader(&self, fh: impl std::io::Read) -> Result<Vec<u8>, std::io::Error> {
+        #[cfg(feature="rustcrypto")]
+        let mut h = self.get_digest();
+        #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
+        let mut h = self.get_ring_context();
 
+        let mut buffer = [0u8; 16384];
         loop {
-            let mut buffer = [0u8; 16384];
             let count = fh.read(&mut buffer)?;
 
-            h.update(&buffer[0..count]);
+            h.update(&buffer[..count]);
 
             if count < buffer.len() {
                 break;
             }
         }
 
+        #[cfg(feature="rustcrypto")]
+        Ok(h.finialize().as_ref().to_vec())
+
+        #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
         Ok(h.finish().as_ref().to_vec())
     }
 
     /// Digest the content of a path.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn digest_path(&self, path: &std::path::Path) -> Result<Vec<u8>, std::io::Error> {
-        self.digest_reader(&mut std::fs::File::open(path)?)
+        self.digest_reader(std::fs::File::open(path)?)
     }
 
     /// EMSA-PKCS1-v1_5 padding procedure.
@@ -247,6 +281,7 @@ impl DigestAlgorithm {
     ///
     /// `target_length_in_bytes` is the target length of the padding. This should match the RSA
     /// key length. e.g. 2048 bit keys are length 256.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn rsa_pkcs1_encode(
         &self,
         message: &[u8],
@@ -295,7 +330,7 @@ impl DigestAlgorithm {
 /// Similarly, instances can be converted to/from an ASN.1
 /// [AlgorithmIdentifier].
 ///
-/// It is also possible to obtain a [signature::VerificationAlgorithm] from
+/// It is also possible to obtain a `ring::signature::VerificationAlgorithm` (if feature `ring` enabled) from
 /// an instance. This type can perform actual cryptographic verification
 /// that was signed with this algorithm.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -395,39 +430,63 @@ impl SignatureAlgorithm {
         Self::NoSignature(digest_algorithm)
     }
 
+    #[cfg(feature="rustcrypto")]
+    pub fn get_rustcrypto_verification_algorithm<T>(
+        &self,
+        key_algorithm: KeyAlgorithm
+    ) -> Result<(impl signature::Signer<T>, impl signature::Verifier<T>), Error> {
+        unimplemented!("due to upstream rust-crypto project does not provides pure-algorithm implementions that does not requires keys during constructing, may open issue later")
+    }
+
     /// Attempt to resolve the verification algorithm using info about the signing key algorithm.
     ///
     /// Only specific combinations of methods are supported. e.g. you can only use
     /// RSA verification with RSA signing keys. Same for ECDSA and ED25519.
-    pub fn resolve_verification_algorithm(
+    #[cfg(feature="ring")]
+    pub fn get_ring_verification_algorithm(
         &self,
         key_algorithm: KeyAlgorithm,
-    ) -> Result<&'static dyn signature::VerificationAlgorithm, Error> {
+    ) -> Result<&'static dyn ring::signature::VerificationAlgorithm, Error> {
         match key_algorithm {
             KeyAlgorithm::Rsa => match self {
-                Self::RsaSha1 => Ok(&signature::RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY),
-                Self::RsaSha256 => Ok(&signature::RSA_PKCS1_2048_8192_SHA256),
-                Self::RsaSha384 => Ok(&signature::RSA_PKCS1_2048_8192_SHA384),
-                Self::RsaSha512 => Ok(&signature::RSA_PKCS1_2048_8192_SHA512),
+                Self::RsaSha1 => Ok(&ring::signature::RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY),
+                Self::RsaSha256 => Ok(&ring::signature::RSA_PKCS1_2048_8192_SHA256),
+                Self::RsaSha384 => Ok(&ring::signature::RSA_PKCS1_2048_8192_SHA384),
+                Self::RsaSha512 => Ok(&ring::signature::RSA_PKCS1_2048_8192_SHA512),
                 alg => Err(Error::UnsupportedSignatureVerification(key_algorithm, *alg)),
             },
             KeyAlgorithm::Ed25519 => match self {
-                Self::Ed25519 => Ok(&signature::ED25519),
+                Self::Ed25519 => Ok(&ring::signature::ED25519),
                 alg => Err(Error::UnsupportedSignatureVerification(key_algorithm, *alg)),
             },
             KeyAlgorithm::Ecdsa(curve) => match curve {
                 EcdsaCurve::Secp256r1 => match self {
-                    Self::EcdsaSha256 => Ok(&signature::ECDSA_P256_SHA256_ASN1),
-                    Self::EcdsaSha384 => Ok(&signature::ECDSA_P256_SHA384_ASN1),
+                    Self::EcdsaSha256 => Ok(&ring::signature::ECDSA_P256_SHA256_ASN1),
+                    Self::EcdsaSha384 => Ok(&ring::signature::ECDSA_P256_SHA384_ASN1),
                     alg => Err(Error::UnsupportedSignatureVerification(key_algorithm, *alg)),
                 },
                 EcdsaCurve::Secp384r1 => match self {
-                    Self::EcdsaSha256 => Ok(&signature::ECDSA_P384_SHA256_ASN1),
-                    Self::EcdsaSha384 => Ok(&signature::ECDSA_P384_SHA384_ASN1),
+                    Self::EcdsaSha256 => Ok(&ring::signature::ECDSA_P384_SHA256_ASN1),
+                    Self::EcdsaSha384 => Ok(&ring::signature::ECDSA_P384_SHA384_ASN1),
                     alg => Err(Error::UnsupportedSignatureVerification(key_algorithm, *alg)),
                 },
             },
         }
+    }
+
+    /// [Deprecated]
+    ///
+    /// Attempt to resolve the verification algorithm using info about the signing key algorithm.
+    ///
+    /// Only specific combinations of methods are supported. e.g. you can only use
+    /// RSA verification with RSA signing keys. Same for ECDSA and ED25519.
+    #[cfg(feature="ring")]
+    #[deprecated]
+    pub fn resolve_verification_algorithm(
+        &self,
+        key_algorithm: KeyAlgorithm,
+    ) -> Result<&'static dyn ring::signature::VerificationAlgorithm, Error> {
+        self.get_ring_verification_algorithm(key_algorithm)
     }
 
     /// Resolve the [DigestAlgorithm] for this signature algorithm.
@@ -556,11 +615,11 @@ impl TryFrom<&Oid> for EcdsaCurve {
     }
 }
 
-impl From<EcdsaCurve> for &'static signature::EcdsaSigningAlgorithm {
+impl From<EcdsaCurve> for &'static ring::signature::EcdsaSigningAlgorithm {
     fn from(curve: EcdsaCurve) -> Self {
         match curve {
-            EcdsaCurve::Secp256r1 => &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
-            EcdsaCurve::Secp384r1 => &signature::ECDSA_P384_SHA384_ASN1_SIGNING,
+            EcdsaCurve::Secp256r1 => &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+            EcdsaCurve::Secp384r1 => &ring::signature::ECDSA_P384_SHA384_ASN1_SIGNING,
         }
     }
 }

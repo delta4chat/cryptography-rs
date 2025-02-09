@@ -20,7 +20,6 @@ use {
     bytes::Bytes,
     chrono::{DateTime, Duration, Utc},
     der::{Decode, Document},
-    ring::signature as ringsig,
     signature::Signer,
     spki::EncodePublicKey,
     std::{
@@ -32,6 +31,9 @@ use {
         ops::{Deref, DerefMut},
     },
 };
+
+#[cfg(feature="ring")]
+use ring::signature as ringsig;
 
 /// Key Usage extension.
 ///
@@ -320,24 +322,38 @@ impl X509Certificate {
     }
 
     /// Obtain the fingerprint for this certificate given a digest algorithm.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn fingerprint(
         &self,
         algorithm: DigestAlgorithm,
     ) -> Result<ring::digest::Digest, std::io::Error> {
         let raw = self.encode_der()?;
 
-        let mut h = algorithm.digester();
-        h.update(&raw);
+        #[cfg(feature="rustcrypto")]
+        {
+            let mut h = algorithm.get_digest();
+            h.update(&raw);
 
-        Ok(h.finish())
+            Ok(h.finialize())
+        }
+
+        #[cfg(feature="ring")]
+        {
+            let mut h = algorithm.get_ring_context();
+            h.update(&raw);
+
+            Ok(h.finish())
+        }
     }
 
     /// Obtain the SHA-1 fingerprint of this certificate.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn sha1_fingerprint(&self) -> Result<ring::digest::Digest, std::io::Error> {
         self.fingerprint(DigestAlgorithm::Sha1)
     }
 
     /// Obtain the SHA-256 fingerprint of this certificate.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn sha256_fingerprint(&self) -> Result<ring::digest::Digest, std::io::Error> {
         self.fingerprint(DigestAlgorithm::Sha256)
     }
@@ -540,6 +556,7 @@ impl CapturedX509Certificate {
     /// bytes constituting the certificate's internals need to be consulted
     /// to verify signatures. And since this type tracks the underlying
     /// bytes, we are guaranteed to have a pristine copy.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn verify_signed_by_certificate(
         &self,
         other: impl AsRef<X509Certificate>,
@@ -562,7 +579,8 @@ impl CapturedX509Certificate {
     /// indicated in this certificate. Typically these align. However, it is possible for
     /// a signature to be produced with a different digest algorithm from that indicated
     /// in this certificate.
-    pub fn verify_signed_data(
+    #[cfg(feature="ring")]
+    pub fn ring_verify_signed_data(
         &self,
         signed_data: impl AsRef<[u8]>,
         signature: impl AsRef<[u8]>,
@@ -574,12 +592,31 @@ impl CapturedX509Certificate {
         self.verify_signed_data_with_algorithm(signed_data, signature, verify_algorithm)
     }
 
+    /// [Deprecated]
+    /// Verify a signature over signed data purportedly signed by this certificate.
+    ///
+    /// This is a wrapper to [Self::verify_signed_data_with_algorithm()] that will derive
+    /// the verification algorithm from the public key type type and the signature algorithm
+    /// indicated in this certificate. Typically these align. However, it is possible for
+    /// a signature to be produced with a different digest algorithm from that indicated
+    /// in this certificate.
+    #[cfg(feature="ring")]
+    #[deprecated]
+    pub fn verify_signed_data(
+        &self,
+        signed_data: impl AsRef<[u8]>,
+        signature: impl AsRef<[u8]>,
+    ) -> Result<(), Error> {
+        self.ring_verify_signed_data(signed_data, signature)
+    }
+
     /// Verify a signature over signed data using an explicit verification algorithm.
     ///
     /// This is like [Self::verify_signed_data()] except the verification algorithm to use
     /// is passed in instead of derived from the default algorithm for the signing key's
     /// type.
-    pub fn verify_signed_data_with_algorithm(
+    #[cfg(feature="ring")]
+    pub fn ring_verify_signed_data_with_algorithm(
         &self,
         signed_data: impl AsRef<[u8]>,
         signature: impl AsRef<[u8]>,
@@ -592,6 +629,24 @@ impl CapturedX509Certificate {
             .map_err(|_| Error::CertificateSignatureVerificationFailed)
     }
 
+    /// [Deprecated]
+    ///
+    /// Verify a signature over signed data using an explicit verification algorithm.
+    ///
+    /// This is like [Self::verify_signed_data()] except the verification algorithm to use
+    /// is passed in instead of derived from the default algorithm for the signing key's
+    /// type.
+    #[cfg(feature="ring")]
+    #[deprecated]
+    pub fn verify_signed_data_with_algorithm(
+        &self,
+        signed_data: impl AsRef<[u8]>,
+        signature: impl AsRef<[u8]>,
+        verify_algorithm: &'static dyn ringsig::VerificationAlgorithm,
+    ) -> Result<(), Error> {
+        self.ring_verify_signed_data_with_algorithm(signed_data, signature, verify_algorithm)
+    }
+
     /// Verifies that this certificate was cryptographically signed using raw public key data from a signing key.
     ///
     /// This function does the low-level work of extracting the signature and
@@ -602,7 +657,8 @@ impl CapturedX509Certificate {
     /// In many cases, an X.509 certificate is signed by another certificate. And
     /// since the public key is embedded in the X.509 certificate, it is easier
     /// to go through [Self::verify_signed_by_certificate] instead.
-    pub fn verify_signed_by_public_key(
+    #[cfg(feature="ring")]
+    pub fn ring_verify_signed_by_public_key(
         &self,
         public_key_data: impl AsRef<[u8]>,
     ) -> Result<(), Error> {
@@ -641,6 +697,27 @@ impl CapturedX509Certificate {
             .map_err(|_| Error::CertificateSignatureVerificationFailed)
     }
 
+    /// [Deprecated]
+    ///
+    /// Verifies that this certificate was cryptographically signed using raw public key data from a signing key.
+    ///
+    /// This function does the low-level work of extracting the signature and
+    /// verification details from the current certificate and figuring out
+    /// the correct combination of cryptography settings to apply to perform
+    /// signature verification.
+    ///
+    /// In many cases, an X.509 certificate is signed by another certificate. And
+    /// since the public key is embedded in the X.509 certificate, it is easier
+    /// to go through [Self::verify_signed_by_certificate] instead.
+    #[cfg(feature="ring")]
+    #[deprecated]
+    pub fn verify_signed_by_public_key(
+        &self,
+        public_key_data: impl AsRef<[u8]>,
+    ) -> Result<(), Error> {
+        self.ring_verify_signed_by_public_key(public_key_data)
+    }
+
     /// Attempt to find the issuing certificate of this one.
     ///
     /// Given an iterable of certificates, we find the first certificate
@@ -649,6 +726,7 @@ impl CapturedX509Certificate {
     ///
     /// This function can yield false negatives for cases where we don't
     /// support the signature algorithm on the incoming certificates.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn find_signing_certificate<'a>(
         &self,
         mut certs: impl Iterator<Item = &'a Self>,
@@ -985,6 +1063,7 @@ impl X509CertificateBuilder {
     }
 
     /// Create a new certificate given settings using the provided key pair.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn create_with_key_pair(
         &self,
         key_pair: &InMemorySigningKeyPair,
@@ -1047,6 +1126,7 @@ impl X509CertificateBuilder {
     }
 
     /// Create a new certificate given settings, using a randomly generated key pair.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn create_with_random_keypair(
         &self,
         key_algorithm: KeyAlgorithm,
