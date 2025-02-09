@@ -67,6 +67,12 @@ const OID_EXTENSION_BASIC_CONSTRAINTS: ConstOid = Oid(&[85, 29, 19]);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct X509Certificate(rfc5280::Certificate);
 
+impl core::hash::Hash for X509Certificate {
+    fn hash<H: core::hash::Hasher>(&self, hasher: &mut H) {
+        hasher.write(self.encode_der().unwrap().as_ref());
+    }
+}
+
 impl X509Certificate {
     /// Construct an instance by parsing DER encoded ASN.1 data.
     pub fn from_der(data: impl AsRef<[u8]>) -> Result<Self, Error> {
