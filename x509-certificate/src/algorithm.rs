@@ -16,6 +16,9 @@ use {
     std::fmt::{Display, Formatter},
 };
 
+#[cfg(feature="rustcrypto")]
+use digest::Digest;
+
 /// SHA-1 digest algorithm.
 ///
 /// 1.3.14.3.2.26
@@ -146,13 +149,13 @@ impl Display for DigestAlgorithm {
 }
 
 impl From<DigestAlgorithm> for Oid {
-    fn from(alg: DigestAlgorithm) -> Self {
+    fn from(alg: DigestAlgorithm) -> Oid {
         Oid(match alg {
             DigestAlgorithm::Sha1 => OID_SHA1,
             DigestAlgorithm::Sha256 => OID_SHA256,
             DigestAlgorithm::Sha384 => OID_SHA384,
             DigestAlgorithm::Sha512 => OID_SHA512,
-        }.as_ref().into())
+        }.0.into())
     }
 }
 
@@ -193,24 +196,24 @@ impl From<DigestAlgorithm> for AlgorithmIdentifier {
 
 #[cfg(feature="ring")]
 impl From<DigestAlgorithm> for ring::digest::Context {
-    fn from(alg: DigestAlgorithm) -> Self {
+    fn from(alg: DigestAlgorithm) -> ring::digest::Context {
         ring::digest::Context::new(match alg {
-            DigestAlgorithm::Sha1 => &digest::SHA1_FOR_LEGACY_USE_ONLY,
-            DigestAlgorithm::Sha256 => &digest::SHA256,
-            DigestAlgorithm::Sha384 => &digest::SHA384,
-            DigestAlgorithm::Sha512 => &digest::SHA512,
+            DigestAlgorithm::Sha1 => &ring::digest::SHA1_FOR_LEGACY_USE_ONLY,
+            DigestAlgorithm::Sha256 => &ring::digest::SHA256,
+            DigestAlgorithm::Sha384 => &ring::digest::SHA384,
+            DigestAlgorithm::Sha512 => &ring::digest::SHA512,
         })
     }
 }
 
 impl DigestAlgorithm {
     #[cfg(feature="rustcrypto")]
-    pub fn get_digest(&self) -> impl digest::Digest {
+    pub fn get_digest(&self) -> Box<dyn digest::DynDigest> {
         match self {
-            Self::Sha1 => sha1::Sha1::new(),
-            Self::Sha256 => sha2::Sha256::new(),
-            Self::Sha384 => sha2::Sha384::new(),
-            Self::Sha512 => sha2::Sha512::new(),
+            Self::Sha1 => Box::new(sha1::Sha1::new()),
+            Self::Sha256 => Box::new(sha2::Sha256::new()),
+            Self::Sha384 => Box::new(sha2::Sha384::new()),
+            Self::Sha512 => Box::new(sha2::Sha512::new()),
         }
     }
 
@@ -232,18 +235,26 @@ impl DigestAlgorithm {
     pub fn digest_data(&self, data: &[u8]) -> Vec<u8> {
         #[cfg(feature="rustcrypto")]
         {
-            self.get_digest().digest().as_ref().to_vec()
+            let mut h = self.get_digest();
+            h.update(data);
+                
+            let mut d = vec![0u8; h.output_size()];
+            h.finalize_into_reset(&mut d).unwrap();
+
+            d
         }
 
         #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
         {
-            self.get_ring_context().update(data).finish().as_ref().to_vec()
+            let mut h = self.get_ring_context();
+            h.update(data);
+            h.finish().as_ref().to_vec()
         }
     }
 
     /// Digest content from a reader.
     #[cfg(any(feature="rustcrypto", feature="ring"))]
-    pub fn digest_reader(&self, fh: impl std::io::Read) -> Result<Vec<u8>, std::io::Error> {
+    pub fn digest_reader(&self, mut fh: impl std::io::Read) -> Result<Vec<u8>, std::io::Error> {
         #[cfg(feature="rustcrypto")]
         let mut h = self.get_digest();
         #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
@@ -261,10 +272,14 @@ impl DigestAlgorithm {
         }
 
         #[cfg(feature="rustcrypto")]
-        Ok(h.finialize().as_ref().to_vec())
+        {
+            Ok(h.finalize().as_ref().to_vec())
+        }
 
         #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
-        Ok(h.finish().as_ref().to_vec())
+        {
+            Ok(h.finish().as_ref().to_vec())
+        }
     }
 
     /// Digest the content of a path.
@@ -434,7 +449,7 @@ impl SignatureAlgorithm {
     pub fn get_rustcrypto_verification_algorithm<T>(
         &self,
         key_algorithm: KeyAlgorithm
-    ) -> Result<(impl signature::Signer<T>, impl signature::Verifier<T>), Error> {
+    ) -> Result<(Box<dyn signature::Signer<T>>, Box<dyn signature::Verifier<T>>), Error> {
         unimplemented!("due to upstream rust-crypto project does not provides pure-algorithm implementions that does not requires keys during constructing, may open issue later")
     }
 
@@ -615,6 +630,7 @@ impl TryFrom<&Oid> for EcdsaCurve {
     }
 }
 
+#[cfg(feature="ring")]
 impl From<EcdsaCurve> for &'static ring::signature::EcdsaSigningAlgorithm {
     fn from(curve: EcdsaCurve) -> Self {
         match curve {

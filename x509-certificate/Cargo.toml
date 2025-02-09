@@ -12,7 +12,7 @@ readme = "README.md"
 
 [features]
 ring = [ "dep:ring" ]
-rustcrypto = [ "ed25519-dalek", "rand", "dep:pkcs8", "dep:digest", "dep:sha2", "dep:ecdsa", "dep:rsa", "dep:sha1" ]
+rustcrypto = [ "ed25519-dalek", "rand", "dep:pkcs8", "dep:digest", "dep:sha2", "dep:rsa", "dep:p256", "dep:p384", "dep:sha1" ]
 test = []
 ed25519-dalek = [ "rand", "dep:ed25519-dalek" ]
 rand = [ "dep:rand" ]
@@ -24,18 +24,20 @@ chrono = { version = "0.4.38", default-features = false, features = ["clock"] }
 der = { version = "0.7.9", features = ["alloc", "zeroize"] }
 hex = "0.4.3"
 pem = "3.0.4"
+
 ring = { version = "0.17.8", optional = true }
 
 digest = { version = "0.10.7", optional = true }
-ecdsa = { version = "0.16.9", optional = true }
-ed25519-dalek = { version = "2.1.1", optional = true }
-rsa = { version = "0.9.7", optional = true }
+ed25519-dalek = { version = "2.1.1", optional = true, features = ["pkcs8", "rand_core"] }
+rsa = { version = "0.9.7", optional = true, features = ["sha2"] }
 sha1 = { version = "0.10.6", optional = true }
 sha2 = { version = "0.10.8", optional = true }
 signature = { version = "2.2.0", features = ["std"] }
 spki = { version = "0.7.3", features = ["alloc"] }
 thiserror = "1.0.66"
 zeroize = { version = "1.8.1", features = ["derive"] }
-rand = { version = "0.9.0", optional = true }
+rand = { version = "0.8.5", optional = true }
 pkcs8 = { version = "0.10.2", optional = true }
+p256 = { version = "0.13.2", optional = true, features = ["ecdsa-core"] }
+p384 = { version = "0.13.1", optional = true, features = ["ecdsa-core"] }
 

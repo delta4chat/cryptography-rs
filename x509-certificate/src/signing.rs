@@ -14,6 +14,12 @@ use {
     zeroize::Zeroizing,
 };
 
+#[cfg(feature="rustcrypto")]
+use {
+    digest::Digest,
+    pkcs8::{EncodePrivateKey, EncodePublicKey},
+};
+
 #[cfg(feature="ring")]
 use ring::{ rand::SystemRandom, signature::{self as ringsig, KeyPair} };
 
@@ -95,6 +101,60 @@ impl TryFrom<&[u8]> for Signature {
     }
 }
 
+#[cfg(feature="rustcrypto")]
+#[derive(Debug)]
+enum EcdsaSigningKey {
+    Secp256r1(p256::ecdsa::SigningKey),
+    Secp384r1(p384::ecdsa::SigningKey),
+}
+
+#[cfg(feature="rustcrypto")]
+impl EcdsaSigningKey {
+    fn random(curve: EcdsaCurve, rng: &mut (impl rand::CryptoRng + rand::RngCore)) -> Self {
+        match curve {
+            EcdsaCurve::Secp256r1 => Self::Secp256r1(p256::ecdsa::SigningKey::random(rng)),
+            EcdsaCurve::Secp384r1 => Self::Secp384r1(p384::ecdsa::SigningKey::random(rng)),
+        }
+    }
+
+    fn parse(curve: EcdsaCurve, info: pkcs8::PrivateKeyInfo) -> Result<Self, Error> {
+        Ok(match curve {
+            EcdsaCurve::Secp256r1 => Self::Secp256r1(p256::ecdsa::SigningKey::try_from(info)?),
+            EcdsaCurve::Secp384r1 => Self::Secp384r1(p384::ecdsa::SigningKey::try_from(info)?),
+        })
+    }
+}
+
+#[cfg(feature="rustcrypto")]
+impl EncodePrivateKey for EcdsaSigningKey {
+    fn to_pkcs8_der(&self) -> pkcs8::Result<SecretDocument> {
+        match self {
+            Self::Secp256r1(ref sk) => {
+                sk.to_pkcs8_der()
+            },
+            Self::Secp384r1(ref sk) => {
+                sk.to_pkcs8_der()
+            }
+        }
+    }
+}
+
+#[cfg(feature="rustcrypto")]
+impl Signer<Signature> for EcdsaSigningKey {
+    fn try_sign(&self, msg: &[u8]) -> Result<Signature, signature::Error> {
+        Ok(Signature(match self {
+            Self::Secp256r1(ref sk) => {
+                let s: p256::ecdsa::Signature = sk.try_sign(msg)?;
+                s.to_bytes().to_vec()
+            },
+            Self::Secp384r1(ref sk) => {
+                let s: p384::ecdsa::Signature = sk.try_sign(msg)?;
+                s.to_bytes().to_vec()
+            }
+        }))
+    }
+}
+
 /// An ECDSA key pair.
 #[derive(Debug)]
 pub struct EcdsaKeyPair {
@@ -103,7 +163,7 @@ pub struct EcdsaKeyPair {
     private_key: Zeroizing<Vec<u8>>,
 
     #[cfg(feature="rustcrypto")]
-    signer: ecdsa::SigningKey,
+    signer: EcdsaSigningKey,
 
     #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
     signer: ringsig::EcdsaKeyPair,
@@ -165,13 +225,16 @@ impl Signer<Signature> for InMemorySigningKeyPair {
                 {
                     kp.signer
                       .try_sign(msg)
-                      .map(|s| { Signature(s.as_ref().to_vec()) })
-                      .map_err(|_| signature::Error::new())
+                      .map(|s| {
+                          let b: Box<[u8]> = s.into();
+                          Signature(b.to_vec())
+                      })
+                      //.map_err(|_| signature::Error::new())
                 }
 
                 #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
                 {
-                    let mut signature = vec![0; kp.ring_key_pair.public().modulus_len()];
+                    let mut signature = vec![0; kp.signer.public().modulus_len()];
 
                     kp.signer
                       .sign(
@@ -188,10 +251,7 @@ impl Signer<Signature> for InMemorySigningKeyPair {
             Self::Ecdsa(kp) => {
                 #[cfg(feature="rustcrypto")]
                 {
-                    kp.signer
-                      .try_sign(msg)
-                      .map(|s| { Signature(s.to_der().as_bytes().to_vec()) })
-                      .map_err(|_| signature::Error::new())
+                    kp.signer.try_sign(msg)
                 }
 
                 #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
@@ -209,8 +269,8 @@ impl Signer<Signature> for InMemorySigningKeyPair {
                 {
                     kp.signer
                       .try_sign(msg)
-                      .map(|s| { Signurate(s.to_bytes().to_vec()) })
-                      .map_err(|_| signature::Error::new())
+                      .map(|s| { Signature(s.to_bytes().to_vec()) })
+                      //.map_err(|_| signature::Error::new())
                 }
 
                 #[cfg(all(not(feature="ed25519-dalek"), feature="ring"))]
@@ -256,25 +316,55 @@ impl Sign for InMemorySigningKeyPair {
         panic!("unable to handle public key data due to no rustcrypto or ring enabled.");
 
         #[cfg(any(feature="rustcrypto", feature="ring"))]
-        Bytes::copy_from_slice(match self {
+        match self {
             Self::Rsa(kp) => {
                 #[cfg(feature="rustcrypto")]
                 {
-                    kp.signer.as_ref().as_ref().to_public_key_der().unwrap().as_bytes()
+                    kp.signer.as_ref().as_ref().to_public_key_der().unwrap().into_vec().into()
                 }
 
                 #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
                 {
-                    kp.signer.public_key().as_ref()
+                    kp.signer.public_key().as_ref().to_vec().into()
                 }
             },
             Self::Ecdsa(kp) => {
-                Bytes::copy_from_slice(kp.ring_pair.public_key().as_ref())
+                #[cfg(feature="rustcrypto")]
+                match kp.signer {
+                    EcdsaSigningKey::Secp256r1(ref sk) => {
+                        sk.verifying_key()
+                          .to_public_key_der()
+                          .unwrap()
+                          .into_vec().into()
+                    },
+                    EcdsaSigningKey::Secp384r1(ref sk) => {
+                        sk.verifying_key()
+                          .to_public_key_der()
+                          .unwrap()
+                          .into_vec().into()
+                    }
+                }
+
+                #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
+                {
+                    kp.signer.public_key().as_ref().to_vec().into()
+                }
             },
             Self::Ed25519(kp) => {
-                Bytes::copy_from_slice(kp.ring_pair.public_key().as_ref())
+                #[cfg(feature="rustcrypto")]
+                {
+                    kp.signer
+                      .verifying_key()
+                      .to_public_key_der().unwrap()
+                      .into_vec().into()
+                }
+
+                #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
+                {
+                    kp.signer.public_key().as_ref().to_vec().into()
+                }
             }
-        })
+        }
     }
 
     fn signature_algorithm(&self) -> Result<SignatureAlgorithm, Error> {
@@ -300,7 +390,7 @@ impl Sign for InMemorySigningKeyPair {
             Self::Ed25519(_kp) => {
                 #[cfg(feature="ed25519-dalek")]
                 {
-                    Some(Zeroizing::new(_kp.as_bytes().to_vec()))
+                    Some(Zeroizing::new(_kp.signer.as_bytes().to_vec()))
                 }
 
                 #[cfg(not(feature="ed25519-dalek"))]
@@ -322,9 +412,8 @@ impl Sign for InMemorySigningKeyPair {
                     Zeroizing::new(key.p.as_slice().to_vec()),
                     Zeroizing::new(key.q.as_slice().to_vec()),
                 ))
-            }
-            Self::Ecdsa(_) => Error,
-            Self::Ed25519(_) => Error,
+            },
+            _ => Err(Error::UnknownSignatureAlgorithm(format!("{}", self.signature_algorithm()?))),
         }
     }
 }
@@ -346,7 +435,7 @@ impl InMemorySigningKeyPair {
 
         let algorithm = KeyAlgorithm::try_from(&key.private_key_algorithm)?;
 
-        #[cfg(feature="pkcs8")]
+        #[cfg(feature="rustcrypto")]
         let _maybe_private_key_info = pkcs8::PrivateKeyInfo::try_from(data.as_ref());
 
         // self.key_algorithm() assumes a 1:1 mapping between KeyAlgorithm and our enum
@@ -366,7 +455,7 @@ impl InMemorySigningKeyPair {
             }
             KeyAlgorithm::Ecdsa(curve) => {
                 #[cfg(feature="rustcrypto")]
-                let signer = ecdsa::SigningKey::try_from(_maybe_private_key_info?)?;
+                let signer = EcdsaSigningKey::parse(curve, _maybe_private_key_info?)?;
 
                 #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
                 let signer = ringsig::EcdsaKeyPair::from_pkcs8(
@@ -389,7 +478,7 @@ impl InMemorySigningKeyPair {
                     pkcs8_der,
 
                     #[cfg(feature="ed25519-dalek")]
-                    signer: ed25519_dalek::SigningKey::try_from(_maybe_private_key_info?)?;
+                    signer: ed25519_dalek::SigningKey::try_from(_maybe_private_key_info?)?,
 
                     #[cfg(all(not(feature="ed25519-dalek"), feature="ring"))]
                     signer: ringsig::Ed25519KeyPair::from_pkcs8(data.as_ref())?,
@@ -410,56 +499,58 @@ impl InMemorySigningKeyPair {
 
     /// Generate a random key pair given a key algorithm and optional ECDSA signing algorithm.
     ///
+    /// RSA generating is supported if feature rustcrypto enabled, but hard-coded to RSA 4096-bit and (SHA2) SHA512. if you need to custom this, please use `rsa` crate directly.
+    ///
     /// The raw PKCS#8 document is returned to facilitate access to the private key.
     ///
     /// Not attempt is made to protect the private key in memory.
     #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn generate_random(key_algorithm: KeyAlgorithm) -> Result<Self, Error> {
         #[cfg(feature="rustcrypto")]
-        let rng = rand::rngs::OsRng;
+        let mut rng = rand::rngs::OsRng;
 
         #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
         let rng = SystemRandom::new();
 
-        let document = match key_algorithm {
+        let s: SecretDocument = match key_algorithm {
             KeyAlgorithm::Ed25519 => {
                 #[cfg(feature="ed25519-dalek")]
                 {
-                    ed25519_dalek::SigningKey::generate(rng).to_pkcs8_der()
+                    ed25519_dalek::SigningKey::generate(&mut rng).to_pkcs8_der()?
                 }
 
                 #[cfg(all(not(feature="ed25519-dalek"), feature="ring"))]
                 {
                     ringsig::Ed25519KeyPair::generate_pkcs8(&rng)
-                    .map_err(|_| Error::KeyPairGenerationError)
+                    .map_err(|_| Error::KeyPairGenerationError)?.as_ref().try_into()?
                 }
             },
             KeyAlgorithm::Ecdsa(curve) => {
                 #[cfg(feature="rustcrypto")]
                 {
-                    Ok(ecdsa::SigningKey::generate(rng).to_pkcs8_der()?)
+                    EcdsaSigningKey::random(curve, &mut rng).to_pkcs8_der()?
                 }
 
                 #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
                 {
                     ringsig::EcdsaKeyPair::generate_pkcs8(curve.into(), &rng)
-                    .map_err(|_| Error::KeyPairGenerationError)
+                    .map_err(|_| { Error::KeyPairGenerationError })?.as_ref().try_into()?
                 }
             },
             KeyAlgorithm::Rsa => {
                 #[cfg(feature="rustcrypto")]
                 {
-                    Ok(rsa::pkcs1v15::SigningKey::random(&mut rng, 4096)?.to_pkcs8_der())
+                    rsa::pkcs1v15::SigningKey::<sha2::Sha512>::random(&mut rng, 4096)
+                    .map_err(|_| { Error::KeyPairGenerationError })?
+                    .to_pkcs8_der()?
                 }
 
                 #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
-                {
-                    Err(Error::RsaKeyGenerationNotSupported)
-                }
+                return Err(Error::RsaKeyGenerationNotSupported);
             },
-        }?;
+        };
 
-        Self::from_pkcs8_der(document.as_ref())
+        Self::from_pkcs8_der(s.as_bytes())
     }
 
     /// Attempt to resolve a verification algorithm for this key pair.

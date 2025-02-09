@@ -32,6 +32,9 @@ use {
     },
 };
 
+#[cfg(feature="rustcrypto")]
+use digest::Digest;
+
 #[cfg(feature="ring")]
 use ring::signature as ringsig;
 
@@ -332,7 +335,7 @@ impl X509Certificate {
     pub fn fingerprint(
         &self,
         algorithm: DigestAlgorithm,
-    ) -> Result<ring::digest::Digest, std::io::Error> {
+    ) -> Result<impl AsRef<[u8]>, std::io::Error> {
         let raw = self.encode_der()?;
 
         #[cfg(feature="rustcrypto")]
@@ -340,10 +343,10 @@ impl X509Certificate {
             let mut h = algorithm.get_digest();
             h.update(&raw);
 
-            Ok(h.finialize())
+            Ok(h.finalize())
         }
 
-        #[cfg(feature="ring")]
+        #[cfg(all(not(feature="rustcrypto"), feature="ring"))]
         {
             let mut h = algorithm.get_ring_context();
             h.update(&raw);
@@ -354,13 +357,13 @@ impl X509Certificate {
 
     /// Obtain the SHA-1 fingerprint of this certificate.
     #[cfg(any(feature="rustcrypto", feature="ring"))]
-    pub fn sha1_fingerprint(&self) -> Result<ring::digest::Digest, std::io::Error> {
+    pub fn sha1_fingerprint(&self) -> Result<impl AsRef<[u8]>, std::io::Error> {
         self.fingerprint(DigestAlgorithm::Sha1)
     }
 
     /// Obtain the SHA-256 fingerprint of this certificate.
     #[cfg(any(feature="rustcrypto", feature="ring"))]
-    pub fn sha256_fingerprint(&self) -> Result<ring::digest::Digest, std::io::Error> {
+    pub fn sha256_fingerprint(&self) -> Result<impl AsRef<[u8]>, std::io::Error> {
         self.fingerprint(DigestAlgorithm::Sha256)
     }
 
@@ -575,7 +578,11 @@ impl CapturedX509Certificate {
             .subject_public_key
             .octet_bytes();
 
-        self.verify_signed_by_public_key(public_key)
+        #[cfg(feature="ring")]
+        return self.ring_verify_signed_by_public_key(public_key);
+
+        #[cfg(feature="rustcrypto")]
+        todo!();
     }
 
     /// Verify a signature over signed data purportedly signed by this certificate.
@@ -593,9 +600,9 @@ impl CapturedX509Certificate {
     ) -> Result<(), Error> {
         let key_algorithm = KeyAlgorithm::try_from(self.key_algorithm_oid())?;
         let signature_algorithm = SignatureAlgorithm::try_from(self.signature_algorithm_oid())?;
-        let verify_algorithm = signature_algorithm.resolve_verification_algorithm(key_algorithm)?;
+        let verify_algorithm = signature_algorithm.get_ring_verification_algorithm(key_algorithm)?;
 
-        self.verify_signed_data_with_algorithm(signed_data, signature, verify_algorithm)
+        self.ring_verify_signed_data_with_algorithm(signed_data, signature, verify_algorithm)
     }
 
     /// [Deprecated]
@@ -694,7 +701,7 @@ impl CapturedX509Certificate {
         )?;
         let signature_algorithm = SignatureAlgorithm::try_from(&this_cert.0.signature_algorithm)?;
 
-        let verify_algorithm = signature_algorithm.resolve_verification_algorithm(key_algorithm)?;
+        let verify_algorithm = signature_algorithm.get_ring_verification_algorithm(key_algorithm)?;
 
         let public_key = ringsig::UnparsedPublicKey::new(verify_algorithm, public_key_data);
 
@@ -759,6 +766,7 @@ impl CapturedX509Certificate {
     ///
     /// Because we need to recursively verify certificates, the incoming
     /// iterator is buffered.
+    #[cfg(any(feature="rustcrypto", feature="ring"))]
     pub fn resolve_signing_chain<'a>(
         &self,
         certs: impl Iterator<Item = &'a Self>,

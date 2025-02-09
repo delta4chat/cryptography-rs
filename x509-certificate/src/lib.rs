@@ -145,6 +145,10 @@ pub enum X509CertificateError {
     #[error("target length for PKCS#1 padding to too short")]
     PkcsEncodeTooShort,
 
+    #[cfg(feature="rustcrypto")]
+    #[error("PKCS#8 Encode/Decode Error: {0}")]
+    Pkcs8Error(#[from] pkcs8::Error),
+
     #[error("unhandled error: {0}")]
     Other(String),
 }
