@@ -1,6 +1,6 @@
 [package]
 name = "x509cert"
-version = "0.25.1"
+version = "0.25.2"
 authors = ["Gregory Szorc <gregory.szorc@gmail.com>", "Delta4 <156182500+delta4chat@users.noreply.github.com>"]
 edition = "2021"
 rust-version = "1.75"
